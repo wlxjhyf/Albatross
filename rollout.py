@@ -77,6 +77,11 @@ for n in range(BATCH_SIZE):
     if eod.size:
         tokens = tokens[:eod[0]] # get tokens before eod (token 0)
 
-    out_str = tokenizer.decode(tokens)
-    print(out_str)
-    print('\n' + '#'*80 + '\n')
+    out_str = tokenizer.decode(tokens).strip()
+    # print(out_str)
+    # print('\n' + '#'*80 + '\n')
+    if eod.size:
+        print(out_str.splitlines()[-1].strip())
+    else:
+        print(f'(unfinished within {GENERATION_LENGTH} tokens)')
+    print('#'*80)
