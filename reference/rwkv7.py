@@ -112,18 +112,54 @@ class RWKV_x070(MyModule):
         else:
             return self.forward_one(idx, state)
         
-    def forward_batch(self, idxs, state, full_output=False):
-        assert type(idxs) is list
-        assert len(set([len(x) for x in idxs])) == 1, 'currently all token inputs in a batch must have the same length'
+    def forward_batch(self, tokens, state, full_output=False):
+        assert type(tokens) is list
+        if len(set([len(x) for x in tokens])) == 1:
+            return self.forward_batch_same_length(tokens, state, full_output)
+
+        bsz = len(tokens)
+        lengths = [len(t) for t in tokens]
+        pos = [0] * bsz
 
         args = self.args
         if state == None:
             state = [None for _ in range(args.n_layer * 3)]
             for i in range(args.n_layer): # state: 0=att_x_prev 1=att_kv 2=ffn_x_prev
-                state[i*3+0] = torch.zeros((len(idxs), args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")
-                state[i*3+1] = torch.zeros((len(idxs), args.n_embd // args.head_size, args.head_size, args.head_size), dtype=torch.float, requires_grad=False, device="cuda")
-                state[i*3+2] = torch.zeros((len(idxs), args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")
-        return self.forward_seq_batch(idxs, state, full_output)
+                state[i*3+0] = torch.zeros((bsz, args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")
+                state[i*3+1] = torch.zeros((bsz, args.n_embd // args.head_size, args.head_size, args.head_size), dtype=torch.float, requires_grad=False, device="cuda")
+                state[i*3+2] = torch.zeros((bsz, args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")        
+
+        out = None
+        while True:  # !!! FIXME !!! messy code
+            active = [i for i in range(bsz) if pos[i] < lengths[i]]
+            if not active:
+                break
+            step = min(lengths[i] - pos[i] for i in active)
+            batch_tokens = [tokens[i][pos[i]:pos[i]+step] for i in active]
+            batch_state = [s[active] for s in state]
+            new_out, new_states = self.forward_batch_same_length(batch_tokens, batch_state, full_output)
+            for k, i in enumerate(active):
+                if out != None:
+                    out[i] = new_out[k]
+                for s in range(len(state)):
+                    state[s][i] = new_states[s][k]
+                pos[i] += step
+            if out == None:
+                out = new_out
+        return out, state
+
+    def forward_batch_same_length(self, tokens, state, full_output=False):
+        assert type(tokens) is list
+        assert len(set([len(x) for x in tokens])) == 1, 'here all sequences must have the same length'
+
+        args = self.args
+        if state == None:
+            state = [None for _ in range(args.n_layer * 3)]
+            for i in range(args.n_layer): # state: 0=att_x_prev 1=att_kv 2=ffn_x_prev
+                state[i*3+0] = torch.zeros((len(tokens), args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")
+                state[i*3+1] = torch.zeros((len(tokens), args.n_embd // args.head_size, args.head_size, args.head_size), dtype=torch.float, requires_grad=False, device="cuda")
+                state[i*3+2] = torch.zeros((len(tokens), args.n_embd), dtype=DTYPE, requires_grad=False, device="cuda")
+        return self.forward_seq_batch(tokens, state, full_output)
 
     @MyFunction
     def forward_one(self, idx:int, state:List[torch.Tensor]):
