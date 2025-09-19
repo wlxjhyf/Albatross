@@ -52,7 +52,7 @@ for k,v in model.z.items():
 active_GB = active_params/1e9*PARAM_BYTES
 print(f'\nActive params = {round(active_params/1e9,2)} B = {round(active_GB,2)} GB (gigabytes)')
 
-from reference.utils import TRIE_TOKENIZER, sample_logits
+from reference.utils import TRIE_TOKENIZER, sampler_simple, sampler_simple_batch
 tokenizer = TRIE_TOKENIZER("reference/rwkv_vocab_v20230424.txt")
 
 ########################################################################################################
@@ -66,7 +66,7 @@ xprint("Basic")
 prompt = "The Eiffel tower is in the city of"
 print(prompt)
 
-init_out, _ = model.forward(tokenizer.encode(prompt), None)
+init_out = model.forward(tokenizer.encode(prompt), model.generate_zero_state(0))
 probs = F.softmax(init_out.float(), dim=-1) # compute softmax in float (more accurate)
 _, indices = torch.topk(probs, 5) # print top-5 possibilities
 for i in range(len(indices)):
@@ -87,7 +87,7 @@ tokens = [tokenizer.encode(prompt) for prompt in prompts]
 # print(tokens)
 # for prompt in prompts:
 #     print(prompt)
-#     init_out, init_state = model.forward(tokenizer.encode(prompt), None)
+#     init_out = model.forward(tokenizer.encode(prompt), model.generate_zero_state(0))
 #     probs = F.softmax(init_out.float(), dim=-1) # compute softmax in float (more accurate)
 #     _, indices = torch.topk(probs, 5) # print top-5 possibilities
 #     for i in range(len(indices)):
@@ -98,7 +98,7 @@ tokens = [tokenizer.encode(prompt) for prompt in prompts]
 #         token_prob = probs[token_id].item()
 #         print(token, f'[probability {token_prob:.2%}]')
 
-init_outs, _ = model.forward_batch(tokens, None)
+init_outs = model.forward_batch(tokens, model.generate_zero_state(len(prompts)))
 for n in range(len(prompts)):
     print(prompts[n])
     init_out = init_outs[n]
@@ -126,15 +126,15 @@ print(prompt, end="")
 
 all_tokens = []
 out_last = 0
-init_out, init_state = model.forward(tokenizer.encode(prompt), None)
-out, state = init_out.clone(), copy.deepcopy(init_state)
+state = model.generate_zero_state(0)
+out = model.forward(tokenizer.encode(prompt), state)
 
 times = []
 all_times = []
 t000 = time.perf_counter()
 for i in range(LENGTH_PER_TRIAL):
     t00 = time.perf_counter()
-    token = sample_logits(out, TEMPERATURE, TOP_P)
+    token = sampler_simple(out, noise=0).item()
     all_tokens += [token]
     try:
         tmp = tokenizer.decode(all_tokens[out_last:])
@@ -143,10 +143,9 @@ for i in range(LENGTH_PER_TRIAL):
             out_last = i+1
     except:
         pass
-
     torch.cuda.synchronize()
     t0 = time.perf_counter()
-    out, state = model.forward(token, state)
+    out = model.forward(token, state)
     torch.cuda.synchronize()
     t1 = time.perf_counter()
     times.append(t1 - t0)
@@ -160,17 +159,13 @@ print(f'\n\nToken/s = {round(1/times,2)} (forward), {round(1/all_times,2)} (full
 xprint("Decode (batch)")
 
 for BSZ in [2**n for n in range(1,8)] + [128 + n for n in range(8, 512, 8)]:
+# for BSZ in [2**n for n in range(1,8)]:
     torch.cuda.empty_cache()
     gc.collect()
     torch.cuda.empty_cache()
     gc.collect()
 
-    # seems better to do manual initialization here
-    state = [None for _ in range(args.n_layer * 3)]
-    for i in range(args.n_layer):
-        state[i*3+0] = torch.zeros((BSZ, args.n_embd), dtype=torch.half, requires_grad=False, device="cuda")
-        state[i*3+1] = torch.zeros((BSZ, args.n_embd // args.head_size, args.head_size, args.head_size), dtype=torch.float, requires_grad=False, device="cuda")
-        state[i*3+2] = torch.zeros((BSZ, args.n_embd), dtype=torch.half, requires_grad=False, device="cuda")
+    state = model.generate_zero_state(BSZ)
 
     time.sleep(1)
     if BSZ == 2:
@@ -180,26 +175,26 @@ for BSZ in [2**n for n in range(1,8)] + [128 + n for n in range(8, 512, 8)]:
     nnn = len(prompts)
     tokens = [tokenizer.encode(prompt) for prompt in prompts]
     LENGTH_PER_TRIAL = 32
-    TEMPERATURE = 1.0
-    TOP_P = 0.0
+    # TEMPERATURE = 1.0
+    # TOP_P = 0.0
 
     if BSZ == 2:
         print('wait', end='')
     all_tokens = []
-    out, state = model.forward_batch(tokens, state)
+    out = model.forward_batch(tokens, state)
 
     times = []
     all_times = []
     t000 = time.perf_counter()
     for i in range(LENGTH_PER_TRIAL):
         t00 = time.perf_counter()
-        token = [[sample_logits(out[n], TEMPERATURE, TOP_P)] for n in range(nnn)]
+        token = sampler_simple_batch(out, noise=0).tolist()
         all_tokens += [token]
         if BSZ == 2:
             print('.', end='', flush=True)
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        out, state = model.forward_batch(token, state)
+        out = model.forward_batch(token, state)
         torch.cuda.synchronize()
         t1 = time.perf_counter()
         times.append(t1 - t0)
@@ -225,7 +220,7 @@ for BSZ in [2**n for n in range(1,8)] + [128 + n for n in range(8, 512, 8)]:
                     pass
             print('\n')
 
-    print(f'Bsz {BSZ} || Token/s = {round(nnn/times,2)} (forward), {round(nnn/all_times,2)} (full) || {round(time.perf_counter()-t000,3)}s (current sampler is very inefficient and bottleneck)')
+    print(f'Bsz {BSZ} || Token/s = {round(nnn/times,2)} (forward), {round(nnn/all_times,2)} (full) || {round(time.perf_counter()-t000,3)}s')
 
 #######################################################################################################
 
@@ -247,7 +242,7 @@ for stage in range(9, 12+1):
 
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        prob, _ = model.forward(src[:-1], None, full_output=True)
+        prob = model.forward(src[:-1], model.generate_zero_state(0), full_output=True)
         torch.cuda.synchronize()
         t1 = time.perf_counter()
         times.append(t1 - t0)
@@ -279,7 +274,7 @@ def eval_qa(todo, print_interval, pad_eod = True, loss_mode = False):
         logits = 0
         correct = True
         
-        out, _ = model.forward(src+dst, None, full_output=True)
+        out = model.forward(src+dst, model.generate_zero_state(0), full_output=True)
 
         for i in range(len(dst)):
             ooo = out[len(src)-1+i].float()
@@ -429,7 +424,7 @@ for idx, sample in enumerate(mmlu_test):
 
     all_prefix_ids = [0] + tokenizer.encode(all_prefix.replace('\r\n','\n').strip())
 
-    logits, _ = model.forward(all_prefix_ids, None, full_output=False)
+    logits = model.forward(all_prefix_ids, model.generate_zero_state(0), full_output=False)
     
     neg_log_prob = F.log_softmax(logits, dim=-1)
     target_prob = neg_log_prob[choices_token]

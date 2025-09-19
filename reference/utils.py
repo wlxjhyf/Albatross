@@ -41,7 +41,7 @@ def sample_logits(logits, temperature:float=1.0, top_p:float=1.0, top_k:int=0):
     return torch.multinomial(probs, num_samples=1).item()
 
 @MyStatic # !!! will modify logits inplace !!!
-def sampler_simple_batch(logits: torch.Tensor, noise: float = 1.0, temp: float = 1.0):
+def sampler_simple_batch(logits: torch.Tensor, noise: float = 0.0, temp: float = 1.0):
     assert temp > 0, "use noise=0 for greedy decoding"
     with torch.no_grad():
         if temp != 1.0:
@@ -49,6 +49,16 @@ def sampler_simple_batch(logits: torch.Tensor, noise: float = 1.0, temp: float =
         if noise != 0.0:
             logits.add_(torch.empty_like(logits).uniform_(0.0, noise))
         return torch.argmax(logits, dim=-1, keepdim=True)
+
+@MyStatic # !!! will modify logits inplace !!!
+def sampler_simple(logits: torch.Tensor, noise: float = 0.0, temp: float = 1.0):
+    assert temp > 0, "use noise=0 for greedy decoding"
+    with torch.no_grad():
+        if temp != 1.0:
+            logits.mul_(1.0 / temp)
+        if noise != 0.0:
+            logits.add_(torch.empty_like(logits).uniform_(0.0, noise))
+        return torch.argmax(logits, dim=-1, keepdim=False)
 
 class TRIE:
     __slots__ = tuple("ch,to,values,front".split(","))

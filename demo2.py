@@ -83,11 +83,7 @@ def computation_process(text_queue, shutdown_event, control_queue=None):
             
             try:
                 # Initialize state
-                state = [None for _ in range(args.n_layer * 3)]
-                for i in range(args.n_layer):
-                    state[i*3+0] = torch.zeros((BATCH_SIZE, args.n_embd), dtype=torch.half, requires_grad=False, device="cuda")
-                    state[i*3+1] = torch.zeros((BATCH_SIZE, args.n_embd // args.head_size, args.head_size, args.head_size), dtype=torch.float, requires_grad=False, device="cuda")
-                    state[i*3+2] = torch.zeros((BATCH_SIZE, args.n_embd), dtype=torch.half, requires_grad=False, device="cuda")
+                state = model.generate_zero_state(BATCH_SIZE)
                 
                 # clear all panels
                 for i in range(NUM_PANELS):
@@ -99,7 +95,7 @@ def computation_process(text_queue, shutdown_event, control_queue=None):
                 
                 # Initial state with initial words
                 tokens = [tokenizer.encode(prompt) for prompt in prompt_list[current_prompt]]
-                out, state = model.forward_batch(tokens, state)
+                out = model.forward_batch(tokens, state)
                 
                 perf_interval = 10
                 times = []
@@ -133,7 +129,7 @@ def computation_process(text_queue, shutdown_event, control_queue=None):
                     
                     torch.cuda.synchronize()
                     t0 = time.perf_counter()
-                    out, state = model.forward_batch(token, state)
+                    out = model.forward_batch(token, state)
                     torch.cuda.synchronize()
                     t1 = time.perf_counter()
 
