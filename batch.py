@@ -63,30 +63,25 @@ for n in range(len(prompts)):
 ########################################################################################################
 
 prompts = ["也许", "我看到", "他们发现", "我认为", "哈哈", "这是一个有趣的", "List of Emojis:"]
-# prompts = ["这是一个有趣的"] * BSZ
-# prompts = ["他们发现"] * BSZ
-# prompts = ["我看到"] * BSZ
-BSZ = len(prompts)
-tokens = [tokenizer.encode(prompt) for prompt in prompts]
-LENGTH_PER_TRIAL = 4
+BATCH_SIZE = len(prompts)
+# prompts = ["这是一个有趣的"] * BATCH_SIZE
+# prompts = ["他们发现"] * BATCH_SIZE
+# prompts = ["我看到"] * BATCH_SIZE
 
-all_tokens = []
+state = model.generate_zero_state(BATCH_SIZE)
+out = model.forward_batch([tokenizer.encode(prompt) for prompt in prompts], state)
 
-state = model.generate_zero_state(BSZ)
-out = model.forward_batch(tokens, state)
+tokens = []
+GENERATE_LENGTH = 10
+for i in range(GENERATE_LENGTH):
+    new_tokens = sampler_simple_batch(out, noise=0).tolist()
+    tokens.append(new_tokens)
+    out = model.forward_batch(new_tokens, state)
 
-t000 = time.perf_counter()
-for i in range(LENGTH_PER_TRIAL):
-    t00 = time.perf_counter()
-    token = sampler_simple_batch(out, noise=0).tolist()
-    all_tokens += [token]
-    out = model.forward_batch(token, state)
+tokens = np.transpose(np.array(tokens), axes=(1,0,2)).squeeze(-1)
 
 print('\n')
-for n in range(BSZ):
+for n in range(BATCH_SIZE):
     print(prompts[n], end='')
-    aaa_tokens = []
-    for i in range(LENGTH_PER_TRIAL):
-        aaa_tokens += all_tokens[i][n]
-    print(tokenizer.decode(aaa_tokens, utf8_errors="ignore"))
+    print(tokenizer.decode(tokens[n], utf8_errors="ignore"))
     print('#'*80)
