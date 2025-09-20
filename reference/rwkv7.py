@@ -29,6 +29,8 @@ MyStatic = torch.jit.script
 
 DTYPE = torch.half
 
+########################################################################################################
+
 from torch.utils.cpp_extension import load
 HEAD_SIZE = 64
 
@@ -148,13 +150,13 @@ class RWKV_x070(MyModule):
                 break
             step = min(lengths[i] - pos[i] for i in active)
             batch_tokens = [tokens[i][pos[i]:pos[i]+step] for i in active]
-            batch_state = [s[active] for s in state]
-            new_out, new_states = self.forward_batch_same_length(batch_tokens, batch_state, full_output)
+            batch_state = [state[0][:,:,active],state[1][:,active]] # state[0]=[Layer][2][Bsz][C]    state[1]=[Layer][Bsz][H][N][N]
+            new_out = self.forward_batch_same_length(batch_tokens, batch_state, full_output)
             for k, i in enumerate(active):
                 if out != None:
                     out[i] = new_out[k]
-                for s in range(len(state)):
-                    state[s][i] = new_states[s][k]
+                state[0][:,:,i] = batch_state[0][:,:,k]
+                state[1][:,i] = batch_state[1][:,k]
                 pos[i] += step
             if out == None:
                 out = new_out
@@ -232,7 +234,7 @@ class RWKV_x070(MyModule):
     def forward_seq_batch(self, idxs:List[List[int]], state:List[torch.Tensor], full_output:bool=False):
         with torch.no_grad(): 
             z = self.z
-            x = z['emb.weight'][torch.tensor(idxs)]
+            x = z['emb.weight'][torch.tensor(idxs, device=z['emb.weight'].device)]
 
             v_first = torch.empty_like(x)
             for i in range(self.n_layer):
