@@ -143,6 +143,13 @@ print(f'\n\nToken/s = {round(1/times,2)} (forward), {round(1/all_times,2)} (full
 
 xprint("Decode (CUDAGraph)")
 
+static_input = torch.empty((model.args.n_embd), device="cuda", dtype=torch.half)
+static_state = [torch.empty_like(state[0], device="cuda"), torch.empty_like(state[1], device="cuda")]
+static_output = torch.empty((model.args.vocab_size), device="cuda", dtype=torch.half)
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    static_output = model.forward_one_alt(static_input, static_state)
+
 prompt = "User: simulate SpaceX mars landing using python\n\nAssistant: <think"
 LENGTH_PER_TRIAL = 256
 TEMPERATURE = 1.0
@@ -151,23 +158,10 @@ print(prompt, end="")
 
 all_tokens = []
 out_last = 0
+
 state = model.generate_zero_state(0)
 out = model.forward(tokenizer.encode(prompt), state)
-token = sampler_simple(out, noise=0).item()
 
-x = model.z['emb.weight'][token]
-
-static_input = torch.empty_like(x, device="cuda")
-static_state = [None, None]
-static_state[0] = torch.empty_like(state[0], device="cuda")
-static_state[1] = torch.empty_like(state[1], device="cuda")
-static_output = torch.empty_like(out, device="cuda")
-
-g = torch.cuda.CUDAGraph()
-with torch.cuda.graph(g):
-    static_output = model.forward_one_alt(static_input, static_state)
-
-static_input.copy_(x)
 static_state[0].copy_(state[0])
 static_state[1].copy_(state[1])
 static_output.copy_(out)
