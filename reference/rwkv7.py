@@ -93,7 +93,7 @@ class RWKV_x070(MyModule):
         args.head_size = 64
         self.eval()
         
-        self.z = torch.load(args.MODEL_NAME + '.pth', map_location='cuda')
+        self.z = torch.load(args.MODEL_NAME + '.pth', map_location='cpu', mmap=True)
         z = self.z
         self.n_head, self.head_size = z['blocks.0.att.r_k'].shape
         args.n_embd = self.n_head * self.head_size
@@ -106,7 +106,7 @@ class RWKV_x070(MyModule):
         for k in keys:
             if 'key.weight' in k or 'value.weight' in k or 'receptance.weight' in k or 'output.weight' in k or 'head.weight' in k:
                 z[k] = z[k].t()
-            z[k] = z[k].squeeze().to(dtype=DTYPE)
+            z[k] = z[k].squeeze().to(dtype=DTYPE, device="cuda")
             if k.endswith('att.r_k'): z[k] = z[k].flatten()
             z[k] = z[k].contiguous()
             kk = k.split('.')
